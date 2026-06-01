@@ -63,6 +63,20 @@ def generateWithFallbackModels(agentClient, contentParts):
     raise lastErrorMessage
 
 
+def buildScreenAnalysisInstruction(userPromptText):
+    return (
+        f"User question: {userPromptText}\n\n"
+        "You are a screen-reading assistant. Give a direct, detailed explanation of what is visible on the page/app right now.\n"
+        "Required output style:\n"
+        "1) One short direct answer sentence.\n"
+        "2) A concise but rich description of what app/site is open, what page/section the user is on, and the most important visible UI elements.\n"
+        "3) Naturally weave template-match evidence into that same description using phrasing like 'a match found for <template_name> (<confidence>) supports this'.\n"
+        "4) Mention overlays/windows that are blocking part of the page (if any).\n"
+        "Do not create a separate standalone 'Template matches found' section unless the user explicitly asks for that format.\n"
+        "Use both screenshot evidence and tool results. The screenshot should drive the description; template matches should support it."
+    )
+
+
 def buildTemplateMatcherToolContext(userPromptText, metricsByName, topMatchRows):
     roundedMetricsByName = {
         "edge_density": round(metricsByName["edge_density"], 4),
@@ -93,12 +107,11 @@ def buildTemplateMatcherToolContext(userPromptText, metricsByName, topMatchRows)
         "matches": matchRowsWithHints,
     }
     toolPayloadJsonText = json.dumps(toolPayloadByName, indent=2)
-    return (f"User request:\n{userPromptText}\n\n"
-            "TOOL RESULT (authoritative screen detections):\n"
+    return ("TOOL RESULT (grounding data from template matching):\n"
             "```json\n"
             f"{toolPayloadJsonText}\n"
             "```\n\n"
-            "Use the TOOL RESULT above directly in your answer. If it conflicts with visual interpretation, prefer the TOOL RESULT."), roundedMetricsByName
+            "Use this as grounding context, then explain what is visible in the screenshot in normal language."), roundedMetricsByName
 
 
 def runAgent():
@@ -116,7 +129,7 @@ def runAgent():
             fullResolutionScreenshotArray, geminiUploadScreenshotImage, metricsByName, milestoneImagePath = buildScreenBundle()
             templateSummaryText, annotatedTemplateImagePath, topMatchRows = runTemplateMatcherWithMultiScale(screenshotRgbImage=fullResolutionScreenshotArray, templatesDirectoryPath="templates", matchThresholdValue=0.55, maxResultsCount=4, annotatedOutputDirectoryPath=str(outputDirectoryPath))
             toolContextText, roundedMetricsByName = buildTemplateMatcherToolContext(userPromptText=userPromptText, metricsByName=metricsByName, topMatchRows=topMatchRows)
-            contentParts = [toolContextText, geminiUploadScreenshotImage]
+            contentParts = [buildScreenAnalysisInstruction(userPromptText), toolContextText, geminiUploadScreenshotImage]
             print(f"[tool] screenshot attached | saved {milestoneImagePath.name} | metrics={roundedMetricsByName}")
             print(f"[matcher] {templateSummaryText}")
             if annotatedTemplateImagePath:
@@ -130,7 +143,7 @@ def runAgent():
             print(f"[model] used {usedModelName}")
             print(f"\nAgent: {modelResponse.text}\n{'-' * 80}")
         except Exception as errorMessage:
-            # if API has a bad moment just print it and keep going
+            # if API has an error just print it and keep going
             print(f"\nAgent error: {errorMessage}\n{'-' * 80}")
 
 
