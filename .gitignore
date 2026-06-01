@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+private_config.py
+cv_milestone_outputs/
+eval/outputs/
+.uvbin/
+.uvcfg/
+.uvcache/
+.uvdata/
