@@ -1,4 +1,5 @@
 from datetime import datetime
+import json
 from pathlib import Path
 
 import cv2
@@ -8,7 +9,7 @@ import pyautogui
 from google import genai
 
 from private_config import GEMINI_API_KEY
-from template_matcher import runTemplateMatcherWithMultiScale
+from template_matcher import getTemplateHintSentence, runTemplateMatcherWithMultiScale
 
 
 outputDirectoryPath = Path("cv_milestone_outputs")
@@ -18,15 +19,7 @@ fallbackModelNames = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-flash-
 
 def needsScreen(userPromptText: str) -> bool:
     loweredPromptText = userPromptText.lower()
-    screenRelatedKeywords = (
-        "screen",
-        "screenshot",
-        "what am i looking",
-        "what's on",
-        "what is on",
-        "visible",
-        "look at",
-    )
+    screenRelatedKeywords = ("screen", "screenshot", "what am i looking", "what's on", "what is on", "visible", "look at")
     return any(keywordText in loweredPromptText for keywordText in screenRelatedKeywords)
 
 
@@ -70,6 +63,44 @@ def generateWithFallbackModels(agentClient, contentParts):
     raise lastErrorMessage
 
 
+def buildTemplateMatcherToolContext(userPromptText, metricsByName, topMatchRows):
+    roundedMetricsByName = {
+        "edge_density": round(metricsByName["edge_density"], 4),
+        "brightness_mean": round(metricsByName["brightness_mean"], 4),
+        "brightness_std": round(metricsByName["brightness_std"], 4),
+    }
+    matchRowsWithHints = []
+    for matchRow in topMatchRows:
+        matchRowsWithHints.append({
+            "template_name": matchRow["template_name"],
+            "confidence_score": round(matchRow["confidence_score"], 4),
+            "x": matchRow["x"],
+            "y": matchRow["y"],
+            "width": matchRow["width"],
+            "height": matchRow["height"],
+            "center_x": matchRow["center_x"],
+            "center_y": matchRow["center_y"],
+            "scale": round(matchRow["scale"], 2),
+            "semantic_hint": getTemplateHintSentence(matchRow["template_name"]),
+        })
+
+    toolPayloadByName = {
+        "tool_name": "template_matcher",
+        "invocation": "runTemplateMatcherWithMultiScale",
+        "tool_version": "1",
+        "input_query": userPromptText,
+        "screen_metrics": roundedMetricsByName,
+        "matches": matchRowsWithHints,
+    }
+    toolPayloadJsonText = json.dumps(toolPayloadByName, indent=2)
+    return (f"User request:\n{userPromptText}\n\n"
+            "TOOL RESULT (authoritative screen detections):\n"
+            "```json\n"
+            f"{toolPayloadJsonText}\n"
+            "```\n\n"
+            "Use the TOOL RESULT above directly in your answer. If it conflicts with visual interpretation, prefer the TOOL RESULT."), roundedMetricsByName
+
+
 def runAgent():
     agentClient = genai.Client(api_key=GEMINI_API_KEY)
     print("Type prompts. q = quit. Screenshot is auto-attached for screen-related asks.\n")
@@ -83,25 +114,9 @@ def runAgent():
 
         if needsScreen(userPromptText):
             fullResolutionScreenshotArray, geminiUploadScreenshotImage, metricsByName, milestoneImagePath = buildScreenBundle()
-            templateSummaryText, annotatedTemplateImagePath, _topMatchRows = runTemplateMatcherWithMultiScale(
-                screenshotRgbImage=fullResolutionScreenshotArray,
-                templatesDirectoryPath="templates",
-                matchThresholdValue=0.55,
-                maxResultsCount=4,
-                annotatedOutputDirectoryPath=str(outputDirectoryPath),
-            )
-            contentParts = [
-                (
-                    f"{userPromptText}\n\n"
-                    f"CV template matching hints. {templateSummaryText}"
-                ),
-                geminiUploadScreenshotImage,
-            ]
-            roundedMetricsByName = {
-                "edge_density": round(metricsByName["edge_density"], 4),
-                "brightness_mean": round(metricsByName["brightness_mean"], 4),
-                "brightness_std": round(metricsByName["brightness_std"], 4),
-            }
+            templateSummaryText, annotatedTemplateImagePath, topMatchRows = runTemplateMatcherWithMultiScale(screenshotRgbImage=fullResolutionScreenshotArray, templatesDirectoryPath="templates", matchThresholdValue=0.55, maxResultsCount=4, annotatedOutputDirectoryPath=str(outputDirectoryPath))
+            toolContextText, roundedMetricsByName = buildTemplateMatcherToolContext(userPromptText=userPromptText, metricsByName=metricsByName, topMatchRows=topMatchRows)
+            contentParts = [toolContextText, geminiUploadScreenshotImage]
             print(f"[tool] screenshot attached | saved {milestoneImagePath.name} | metrics={roundedMetricsByName}")
             print(f"[matcher] {templateSummaryText}")
             if annotatedTemplateImagePath:

@@ -27,14 +27,7 @@ def getTemplateHintSentence(templateName):
         return "Known template matched on screen."
 
 
-def runTemplateMatcherWithMultiScale(
-    screenshotRgbImage,
-    templatesDirectoryPath="templates",
-    matchThresholdValue=0.45,
-    maxResultsCount=4,
-    annotatedOutputDirectoryPath="cv_milestone_outputs",
-    scaleValues=None,
-):
+def runTemplateMatcherWithMultiScale(screenshotRgbImage, templatesDirectoryPath="templates", matchThresholdValue=0.45, maxResultsCount=4, annotatedOutputDirectoryPath="cv_milestone_outputs", scaleValues=None):
     # this is the scale mismatch fix: test each template at multiple sizes and keep best hit.
     if scaleValues is None:
         scaleValues = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1]
@@ -66,16 +59,8 @@ def runTemplateMatcherWithMultiScale(
             if scaledWidth > screenshotWidth or scaledHeight > screenshotHeight:
                 continue
 
-            scaledTemplateGrayImage = cv2.resize(
-                templateGrayImageOriginal,
-                (scaledWidth, scaledHeight),
-                interpolation=cv2.INTER_AREA if scaleValue < 1.0 else cv2.INTER_LINEAR,
-            )
-            matchResponseMap = cv2.matchTemplate(
-                screenshotGrayImage,
-                scaledTemplateGrayImage,
-                cv2.TM_CCOEFF_NORMED,
-            )
+            scaledTemplateGrayImage = cv2.resize(templateGrayImageOriginal, (scaledWidth, scaledHeight), interpolation=cv2.INTER_AREA if scaleValue < 1.0 else cv2.INTER_LINEAR)
+            matchResponseMap = cv2.matchTemplate(screenshotGrayImage, scaledTemplateGrayImage, cv2.TM_CCOEFF_NORMED)
             _ignoredMinValue, maxScoreValue, _ignoredMinLocation, maxScoreLocation = cv2.minMaxLoc(matchResponseMap)
             if maxScoreValue > bestScoreValue:
                 bestScoreValue = float(maxScoreValue)
@@ -87,19 +72,17 @@ def runTemplateMatcherWithMultiScale(
         if bestScoreValue >= matchThresholdValue:
             centerPositionX = bestLocation[0] + bestWidth // 2
             centerPositionY = bestLocation[1] + bestHeight // 2
-            bestMatchRows.append(
-                {
-                    "template_name": templateName,
-                    "confidence_score": bestScoreValue,
-                    "x": bestLocation[0],
-                    "y": bestLocation[1],
-                    "width": bestWidth,
-                    "height": bestHeight,
-                    "center_x": centerPositionX,
-                    "center_y": centerPositionY,
-                    "scale": bestScaleValue,
-                }
-            )
+            bestMatchRows.append({
+                "template_name": templateName,
+                "confidence_score": bestScoreValue,
+                "x": bestLocation[0],
+                "y": bestLocation[1],
+                "width": bestWidth,
+                "height": bestHeight,
+                "center_x": centerPositionX,
+                "center_y": centerPositionY,
+                "scale": bestScaleValue,
+            })
 
     if not bestMatchRows:
         return "no confident template matches", None, []
@@ -109,14 +92,12 @@ def runTemplateMatcherWithMultiScale(
     topMatchRows = selectNonOverlappingMatches(bestMatchRows, maxResultsCount=maxResultsCount, iouThresholdValue=0.35)
 
     summaryText = " | ".join(
-        (
-            f"name={matchRow['template_name']}, "
-            f"confidence={matchRow['confidence_score']:.2f}, "
-            f"x={matchRow['x']}, y={matchRow['y']}, "
-            f"width={matchRow['width']}, height={matchRow['height']}, "
-            f"center_x={matchRow['center_x']}, center_y={matchRow['center_y']}, "
-            f"scale={matchRow['scale']:.2f}"
-        )
+        f"name={matchRow['template_name']}, "
+        f"confidence={matchRow['confidence_score']:.2f}, "
+        f"x={matchRow['x']}, y={matchRow['y']}, "
+        f"width={matchRow['width']}, height={matchRow['height']}, "
+        f"center_x={matchRow['center_x']}, center_y={matchRow['center_y']}, "
+        f"scale={matchRow['scale']:.2f}"
         for matchRow in topMatchRows
     )
 
@@ -132,16 +113,7 @@ def runTemplateMatcherWithMultiScale(
         bottomRightY = topLeftY + matchRow["height"]
         cv2.rectangle(annotatedBgrImage, (topLeftX, topLeftY), (bottomRightX, bottomRightY), (0, 255, 0), 2)
         cv2.circle(annotatedBgrImage, (matchRow["center_x"], matchRow["center_y"]), 4, (0, 255, 255), -1)
-        cv2.putText(
-            annotatedBgrImage,
-            f"{matchRow['template_name']} {matchRow['confidence_score']:.2f} s={matchRow['scale']:.2f}",
-            (topLeftX, max(18, topLeftY - 6)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (0, 255, 0),
-            1,
-            cv2.LINE_AA,
-        )
+        cv2.putText(annotatedBgrImage, f"{matchRow['template_name']} {matchRow['confidence_score']:.2f} s={matchRow['scale']:.2f}", (topLeftX, max(18, topLeftY - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
     cv2.imwrite(str(annotatedFilePath), annotatedBgrImage)
 
     return summaryText, str(annotatedFilePath), topMatchRows
@@ -180,10 +152,7 @@ def computeIntersectionOverUnion(matchRowOne, matchRowTwo):
 def selectNonOverlappingMatches(sortedMatchRows, maxResultsCount=4, iouThresholdValue=0.35):
     keptMatchRows = []
     for candidateMatchRow in sortedMatchRows:
-        overlapsExistingRow = any(
-            computeIntersectionOverUnion(candidateMatchRow, keptMatchRow) > iouThresholdValue
-            for keptMatchRow in keptMatchRows
-        )
+        overlapsExistingRow = any(computeIntersectionOverUnion(candidateMatchRow, keptMatchRow) > iouThresholdValue for keptMatchRow in keptMatchRows)
         if not overlapsExistingRow:
             keptMatchRows.append(candidateMatchRow)
         if len(keptMatchRows) >= maxResultsCount:
@@ -208,24 +177,10 @@ def keepOnlyHighestBarTemplate(sortedMatchRows):
     return [highestBarTemplateRow] + nonBarTemplateRows
 
 
-def summarizeTemplateMatches(
-    screenshotRgbImage,
-    templatesDirectoryPath="templates",
-    matchThresholdValue=0.55,
-    maxResultsCount=3,
-):
-    summaryText, _annotatedFilePath, _topMatchRows = runTemplateMatcherWithMultiScale(
-        screenshotRgbImage=screenshotRgbImage,
-        templatesDirectoryPath=templatesDirectoryPath,
-        matchThresholdValue=matchThresholdValue,
-        maxResultsCount=maxResultsCount,
-    )
+def summarizeTemplateMatches(screenshotRgbImage, templatesDirectoryPath="templates", matchThresholdValue=0.55, maxResultsCount=3):
+    summaryText, _, _ = runTemplateMatcherWithMultiScale(screenshotRgbImage=screenshotRgbImage, templatesDirectoryPath=templatesDirectoryPath, matchThresholdValue=matchThresholdValue, maxResultsCount=maxResultsCount)
     return summaryText
 
 
-def summarize_template_matches( screenshot_rgb, templates_dir="templates", match_threshold=0.62, max_results=3,):
-    return summarizeTemplateMatches(
-        screenshotRgbImage=screenshot_rgb,
-        templatesDirectoryPath=templates_dir,
-        matchThresholdValue=match_threshold,
-        maxResultsCount=max_results)
+def summarize_template_matches(screenshot_rgb, templates_dir="templates", match_threshold=0.62, max_results=3):
+    return summarizeTemplateMatches(screenshotRgbImage=screenshot_rgb, templatesDirectoryPath=templates_dir, matchThresholdValue=match_threshold, maxResultsCount=max_results)
